@@ -36,6 +36,20 @@
   }
   .note-name sub { font-size: 40px; }
   .freq { font-size: 15px; color: #9aa0a6; min-height: 20px; font-variant-numeric: tabular-nums; }
+  .level {
+    width: 160px;
+    height: 4px;
+    margin: 6px auto 0;
+    background: #2a2e33;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .level > div {
+    height: 100%;
+    width: 0%;
+    background: #0a84ff;
+    border-radius: 2px;
+  }
   .hint { font-size: 15px; color: #9aa0a6; min-height: 20px; }
   .in-tune { color: #34c759 !important; }
   .off-tune { color: #e8eaed; }
@@ -131,6 +145,7 @@
     <div class="note-name off-tune" id="noteName">—</div>
     <div class="freq" id="freq"></div>
     <div class="hint" id="hint">彈一根弦</div>
+    <div class="level"><div id="levelBar"></div></div>
   </div>
 
   <div class="meter">
@@ -178,7 +193,8 @@ const STRINGS = [
 const $ = id => document.getElementById(id);
 const noteNameEl = $("noteName"), freqEl = $("freq"), hintEl = $("hint"),
       centsEl = $("cents"), needleEl = $("needle"), overlayEl = $("overlay"),
-      errEl = $("errMsg"), stringsEl = $("strings"), autoBtn = $("autoBtn");
+      errEl = $("errMsg"), stringsEl = $("strings"), autoBtn = $("autoBtn"),
+      levelBarEl = $("levelBar");
 
 let audioCtx = null, analyser = null, buf = null;
 let selectedString = -1;          // -1 = 自動
@@ -223,47 +239,49 @@ function updateStringButtons() {
   autoBtn.classList.toggle("active", selectedString === -1);
 }
 
-// ---- 音高偵測:自相關 + 拋物線內插 ----
+// ---- 音高偵測:正規化自相關 + 拋物線內插 ----
+// 用相關性品質(clarity)而非音量當主要門檻,小聲也能偵測
+let lastRms = 0;
 function detectPitch(buf, sampleRate) {
   const n = buf.length;
-  // 音量門檻
-  let rms = 0;
-  for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
-  rms = Math.sqrt(rms / n);
-  if (rms < 0.01) return -1;
+  let energy = 0;
+  for (let i = 0; i < n; i++) energy += buf[i] * buf[i];
+  const rms = Math.sqrt(energy / n);
+  lastRms = rms;
+  if (rms < 0.0015) return -1;
 
-  // 掐頭去尾,找訊號夠強的區段
-  let r1 = 0, r2 = n - 1;
-  const thres = 0.2;
-  for (let i = 0; i < n / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
-  for (let i = 1; i < n / 2; i++) if (Math.abs(buf[n - i]) < thres) { r2 = n - i; break; }
-  const seg = buf.slice(r1, r2);
-  const m = seg.length;
-  if (m < 256) return -1;
-
-  const c = new Float32Array(m);
-  for (let lag = 0; lag < m; lag++) {
+  const minLag = Math.floor(sampleRate / 500); // 上限 500 Hz
+  const maxLag = Math.min(Math.floor(sampleRate / 60), n >> 1); // 下限 60 Hz
+  const c = new Float32Array(maxLag + 2);
+  for (let lag = minLag; lag <= maxLag + 1; lag++) {
     let sum = 0;
-    for (let i = 0; i < m - lag; i++) sum += seg[i] * seg[i + lag];
-    c[lag] = sum;
+    for (let i = 0; i < n - lag; i++) sum += buf[i] * buf[i + lag];
+    c[lag] = sum / (n - lag); // 補償重疊長度隨 lag 變短
   }
+  const c0 = energy / n;
 
-  let d = 0;
-  while (d < m - 1 && c[d] > c[d + 1]) d++;
-  let maxval = -1, maxpos = -1;
-  for (let i = d; i < m; i++) {
-    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+  let bestVal = 0;
+  for (let lag = minLag + 1; lag <= maxLag; lag++)
+    if (c[lag] > bestVal) bestVal = c[lag];
+  if (bestVal / c0 < 0.5) return -1; // 相關性太低 → 雜訊,不是弦音
+
+  // 夠高的峰值中取 lag 最小者,避免低八度誤判
+  let T0 = -1;
+  for (let lag = minLag + 1; lag <= maxLag; lag++) {
+    if (c[lag] > c[lag - 1] && c[lag] >= c[lag + 1] && c[lag] >= bestVal * 0.85) {
+      T0 = lag; break;
+    }
   }
-  if (maxpos <= 0) return -1;
-  let T0 = maxpos;
+  if (T0 < 0) return -1;
 
   // 拋物線內插
-  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1] ?? x2;
+  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
   const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
-  if (a) T0 = T0 - b / (2 * a);
+  let T = T0;
+  if (a) T = T0 - b / (2 * a);
 
-  const f = sampleRate / T0;
-  if (f < 60 || f > 1000) return -1;
+  const f = sampleRate / T;
+  if (f < 60 || f > 520) return -1;
   return f;
 }
 
@@ -291,6 +309,7 @@ function nearestString(f) {
 function loop() {
   analyser.getFloatTimeDomainData(buf);
   const f = detectPitch(buf, audioCtx.sampleRate);
+  levelBarEl.style.width = Math.min(100, lastRms * 1200) + "%";
 
   if (f < 0) {
     smoothCents = null;
@@ -360,7 +379,7 @@ $("startBtn").addEventListener("click", async () => {
     });
     const src = audioCtx.createMediaStreamSource(stream);
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
+    analyser.fftSize = 4096;
     src.connect(analyser);
     buf = new Float32Array(analyser.fftSize);
 
