@@ -239,46 +239,59 @@ function updateStringButtons() {
   autoBtn.classList.toggle("active", selectedString === -1);
 }
 
-// ---- 音高偵測:正規化自相關 + 拋物線內插 ----
-// 用相關性品質(clarity)而非音量當主要門檻,小聲也能偵測
+// ---- 音高偵測:YIN 演算法 ----
+// 改寫自開源專案 pitchfinder(MIT License)的 YIN 實作
+// https://github.com/peterkhayes/pitchfinder
+// YIN 用「累積平均正規化差分函數」找基頻,對吉他泛音造成的八度誤判有天然抵抗力
 let lastRms = 0;
 function detectPitch(buf, sampleRate) {
   const n = buf.length;
   let energy = 0;
   for (let i = 0; i < n; i++) energy += buf[i] * buf[i];
-  const rms = Math.sqrt(energy / n);
-  lastRms = rms;
-  if (rms < 0.0015) return -1;
+  lastRms = Math.sqrt(energy / n);
+  if (lastRms < 0.0015) return -1;
 
-  const minLag = Math.floor(sampleRate / 500); // 上限 500 Hz
-  const maxLag = Math.min(Math.floor(sampleRate / 60), n >> 1); // 下限 60 Hz
-  const c = new Float32Array(maxLag + 2);
-  for (let lag = minLag; lag <= maxLag + 1; lag++) {
+  const half = n >> 1;
+  const minTau = Math.floor(sampleRate / 500); // 上限 500 Hz
+  const maxTau = Math.min(Math.floor(sampleRate / 60), half - 2); // 下限 60 Hz
+  const YIN_THRESHOLD = 0.12;
+
+  // 差分函數 + 累積平均正規化(CMNDF)
+  const d = new Float32Array(maxTau + 2);
+  d[0] = 1;
+  let runningSum = 0;
+  for (let tau = 1; tau <= maxTau + 1; tau++) {
     let sum = 0;
-    for (let i = 0; i < n - lag; i++) sum += buf[i] * buf[i + lag];
-    c[lag] = sum / (n - lag); // 補償重疊長度隨 lag 變短
+    for (let i = 0; i < half; i++) {
+      const delta = buf[i] - buf[i + tau];
+      sum += delta * delta;
+    }
+    runningSum += sum;
+    d[tau] = runningSum ? (sum * tau) / runningSum : 1;
   }
-  const c0 = energy / n;
 
-  let bestVal = 0;
-  for (let lag = minLag + 1; lag <= maxLag; lag++)
-    if (c[lag] > bestVal) bestVal = c[lag];
-  if (bestVal / c0 < 0.5) return -1; // 相關性太低 → 雜訊,不是弦音
-
-  // 夠高的峰值中取 lag 最小者,避免低八度誤判
-  let T0 = -1;
-  for (let lag = minLag + 1; lag <= maxLag; lag++) {
-    if (c[lag] > c[lag - 1] && c[lag] >= c[lag + 1] && c[lag] >= bestVal * 0.85) {
-      T0 = lag; break;
+  // 找第一個低於門檻的 dip(即基頻週期,先到先贏 → 不會抓到倍長週期)
+  let tau = -1;
+  for (let t = minTau; t <= maxTau; t++) {
+    if (d[t] < YIN_THRESHOLD) {
+      while (t + 1 <= maxTau && d[t + 1] < d[t]) t++;
+      tau = t;
+      break;
     }
   }
-  if (T0 < 0) return -1;
+  if (tau === -1) {
+    // 沒有夠好的 dip → 找全域最低點,但品質太差就放棄
+    let best = minTau;
+    for (let t = minTau + 1; t <= maxTau; t++) if (d[t] < d[best]) best = t;
+    if (d[best] >= 0.25) return -1;
+    tau = best;
+  }
 
   // 拋物線內插
-  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
-  const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
-  let T = T0;
-  if (a) T = T0 - b / (2 * a);
+  const x0 = d[tau - 1], x1 = d[tau], x2 = d[tau + 1];
+  const a = (x0 + x2 - 2 * x1) / 2, b = (x2 - x0) / 2;
+  let T = tau;
+  if (a) T = tau - b / (2 * a);
 
   const f = sampleRate / T;
   if (f < 60 || f > 520) return -1;
