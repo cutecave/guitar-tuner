@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111418">
+<title>吉他調音器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overscroll-behavior: none; }
+  body {
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    background: #111418;
+    color: #e8eaed;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  h1 { font-size: 17px; font-weight: 600; color: #9aa0a6; letter-spacing: 2px; }
+
+  /* 音名顯示 */
+  .note-area { text-align: center; }
+  .note-name {
+    font-size: 96px;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    transition: color .15s;
+  }
+  .note-name sub { font-size: 40px; }
+  .freq { font-size: 15px; color: #9aa0a6; min-height: 20px; font-variant-numeric: tabular-nums; }
+  .hint { font-size: 15px; color: #9aa0a6; min-height: 20px; }
+  .in-tune { color: #34c759 !important; }
+  .off-tune { color: #e8eaed; }
+
+  /* 指針表 */
+  .meter { width: 100%; max-width: 360px; }
+  .meter svg { width: 100%; display: block; }
+  .cents-label {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 600;
+    min-height: 30px;
+    font-variant-numeric: tabular-nums;
+    color: #9aa0a6;
+  }
+
+  /* 弦按鈕 */
+  .strings {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    width: 100%;
+    max-width: 400px;
+  }
+  .string-btn {
+    aspect-ratio: 1 / 1.15;
+    border: 1.5px solid #3c4043;
+    border-radius: 14px;
+    background: #1b1f24;
+    color: #e8eaed;
+    font-size: 20px;
+    font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .string-btn small { font-size: 11px; color: #9aa0a6; font-weight: 400; }
+  .string-btn.active { border-color: #0a84ff; background: #16232f; color: #0a84ff; }
+  .string-btn.active small { color: #0a84ff; }
+  .string-btn.tuned { border-color: #34c759; }
+  .string-btn.tuned::after { content: "✓"; font-size: 11px; color: #34c759; }
+
+  .mode-row { display: flex; gap: 10px; align-items: center; }
+  .mode-btn {
+    border: 1.5px solid #3c4043;
+    border-radius: 999px;
+    background: #1b1f24;
+    color: #9aa0a6;
+    font-size: 14px;
+    padding: 8px 18px;
+    cursor: pointer;
+  }
+  .mode-btn.active { border-color: #0a84ff; color: #0a84ff; background: #16232f; }
+
+  /* 啟動遮罩 */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: #111418;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    z-index: 10;
+    padding: 24px;
+    text-align: center;
+  }
+  .overlay.hidden { display: none; }
+  .start-btn {
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+    background: #0a84ff;
+    border: none;
+    border-radius: 999px;
+    padding: 18px 48px;
+    cursor: pointer;
+  }
+  .start-btn:active { opacity: .8; }
+  .overlay p { color: #9aa0a6; font-size: 15px; line-height: 1.6; }
+  .overlay .err { color: #ff453a; }
+  .guitar-icon { font-size: 64px; }
+</style>
+</head>
+<body>
+  <h1>吉他調音器</h1>
+
+  <div class="note-area">
+    <div class="note-name off-tune" id="noteName">—</div>
+    <div class="freq" id="freq"></div>
+    <div class="hint" id="hint">彈一根弦</div>
+  </div>
+
+  <div class="meter">
+    <svg viewBox="0 0 200 110" id="meterSvg">
+      <!-- 刻度弧 -->
+      <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#3c4043" stroke-width="2"/>
+      <g id="ticks" stroke="#5f6368" stroke-width="1.5"></g>
+      <!-- 中央準點區 -->
+      <line x1="100" y1="20" x2="100" y2="32" stroke="#34c759" stroke-width="3" stroke-linecap="round"/>
+      <!-- 指針 -->
+      <g id="needle" transform="rotate(0 100 100)">
+        <line x1="100" y1="100" x2="100" y2="30" stroke="#e8eaed" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      <circle cx="100" cy="100" r="6" fill="#e8eaed"/>
+    </svg>
+    <div class="cents-label" id="cents"></div>
+  </div>
+
+  <div class="strings" id="strings"></div>
+
+  <div class="mode-row">
+    <button class="mode-btn active" id="autoBtn">自動偵測</button>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="guitar-icon">🎸</div>
+    <p>需要使用麥克風來偵測音高<br>請在下一步允許存取</p>
+    <button class="start-btn" id="startBtn">開始調音</button>
+    <p class="err" id="errMsg"></p>
+  </div>
+
+<script>
+"use strict";
+
+// 標準調音 EADGBE
+const STRINGS = [
+  { name: "E", octave: 2, freq: 82.41,  label: "6弦" },
+  { name: "A", octave: 2, freq: 110.00, label: "5弦" },
+  { name: "D", octave: 3, freq: 146.83, label: "4弦" },
+  { name: "G", octave: 3, freq: 196.00, label: "3弦" },
+  { name: "B", octave: 3, freq: 246.94, label: "2弦" },
+  { name: "E", octave: 4, freq: 329.63, label: "1弦" },
+];
+
+const $ = id => document.getElementById(id);
+const noteNameEl = $("noteName"), freqEl = $("freq"), hintEl = $("hint"),
+      centsEl = $("cents"), needleEl = $("needle"), overlayEl = $("overlay"),
+      errEl = $("errMsg"), stringsEl = $("strings"), autoBtn = $("autoBtn");
+
+let audioCtx = null, analyser = null, buf = null;
+let selectedString = -1;          // -1 = 自動
+let tunedFlags = new Array(6).fill(false);
+let smoothCents = null;
+let inTuneSince = 0;
+
+// 建立刻度
+(() => {
+  const g = $("ticks");
+  let html = "";
+  for (let c = -50; c <= 50; c += 10) {
+    const a = (c / 50) * 60 * Math.PI / 180; // ±60度
+    const long = (c % 50 === 0 || c === 0);
+    const r1 = 80, r2 = long ? 70 : 74;
+    const x1 = 100 + r1 * Math.sin(a), y1 = 100 - r1 * Math.cos(a);
+    const x2 = 100 + r2 * Math.sin(a), y2 = 100 - r2 * Math.cos(a);
+    html += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+  }
+  g.innerHTML = html;
+})();
+
+// 弦按鈕
+STRINGS.forEach((s, i) => {
+  const b = document.createElement("button");
+  b.className = "string-btn";
+  b.innerHTML = `${s.name}<sub style="font-size:12px">${s.octave}</sub><small>${s.label}</small>`;
+  b.addEventListener("click", () => {
+    if (selectedString === i) { selectedString = -1; }
+    else { selectedString = i; }
+    updateStringButtons();
+  });
+  stringsEl.appendChild(b);
+});
+autoBtn.addEventListener("click", () => { selectedString = -1; updateStringButtons(); });
+
+function updateStringButtons() {
+  [...stringsEl.children].forEach((b, i) => {
+    b.classList.toggle("active", selectedString === i);
+    b.classList.toggle("tuned", tunedFlags[i]);
+  });
+  autoBtn.classList.toggle("active", selectedString === -1);
+}
+
+// ---- 音高偵測:自相關 + 拋物線內插 ----
+function detectPitch(buf, sampleRate) {
+  const n = buf.length;
+  // 音量門檻
+  let rms = 0;
+  for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / n);
+  if (rms < 0.01) return -1;
+
+  // 掐頭去尾,找訊號夠強的區段
+  let r1 = 0, r2 = n - 1;
+  const thres = 0.2;
+  for (let i = 0; i < n / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  for (let i = 1; i < n / 2; i++) if (Math.abs(buf[n - i]) < thres) { r2 = n - i; break; }
+  const seg = buf.slice(r1, r2);
+  const m = seg.length;
+  if (m < 256) return -1;
+
+  const c = new Float32Array(m);
+  for (let lag = 0; lag < m; lag++) {
+    let sum = 0;
+    for (let i = 0; i < m - lag; i++) sum += seg[i] * seg[i + lag];
+    c[lag] = sum;
+  }
+
+  let d = 0;
+  while (d < m - 1 && c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < m; i++) {
+    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+  }
+  if (maxpos <= 0) return -1;
+  let T0 = maxpos;
+
+  // 拋物線內插
+  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1] ?? x2;
+  const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
+  if (a) T0 = T0 - b / (2 * a);
+
+  const f = sampleRate / T0;
+  if (f < 60 || f > 1000) return -1;
+  return f;
+}
+
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+function freqToNote(f) {
+  const midi = 69 + 12 * Math.log2(f / 440);
+  const rounded = Math.round(midi);
+  return {
+    name: NOTE_NAMES[((rounded % 12) + 12) % 12],
+    octave: Math.floor(rounded / 12) - 1,
+    cents: (midi - rounded) * 100,
+  };
+}
+
+function nearestString(f) {
+  let best = 0, bestDist = Infinity;
+  STRINGS.forEach((s, i) => {
+    const d = Math.abs(Math.log2(f / s.freq));
+    if (d < bestDist) { bestDist = d; best = i; }
+  });
+  return best;
+}
+
+// ---- 主迴圈 ----
+function loop() {
+  analyser.getFloatTimeDomainData(buf);
+  const f = detectPitch(buf, audioCtx.sampleRate);
+
+  if (f < 0) {
+    smoothCents = null;
+    noteNameEl.textContent = "—";
+    noteNameEl.className = "note-name off-tune";
+    freqEl.textContent = "";
+    centsEl.textContent = "";
+    centsEl.style.color = "#9aa0a6";
+    hintEl.textContent = selectedString >= 0
+      ? `彈 ${STRINGS[selectedString].label}(${STRINGS[selectedString].name}${STRINGS[selectedString].octave})`
+      : "彈一根弦";
+    needleEl.setAttribute("transform", "rotate(0 100 100)");
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  // 目標弦:手動選 or 自動找最近
+  const si = selectedString >= 0 ? selectedString : nearestString(f);
+  const target = STRINGS[si];
+  let cents = 1200 * Math.log2(f / target.freq);
+  cents = Math.max(-99, Math.min(99, cents));
+
+  // 平滑
+  smoothCents = smoothCents === null ? cents : smoothCents * 0.7 + cents * 0.3;
+  const sc = smoothCents;
+
+  const inTune = Math.abs(sc) < 5;
+  noteNameEl.innerHTML = `${target.name}<sub>${target.octave}</sub>`;
+  noteNameEl.className = "note-name " + (inTune ? "in-tune" : "off-tune");
+  freqEl.textContent = `${f.toFixed(1)} Hz`;
+
+  if (inTune) {
+    hintEl.textContent = "準了 ✓";
+    centsEl.textContent = "✓";
+    centsEl.style.color = "#34c759";
+    if (!inTuneSince) inTuneSince = performance.now();
+    if (performance.now() - inTuneSince > 700 && !tunedFlags[si]) {
+      tunedFlags[si] = true;
+      updateStringButtons();
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+  } else {
+    inTuneSince = 0;
+    hintEl.textContent = sc > 0 ? "太高 ↓ 轉鬆" : "太低 ↑ 轉緊";
+    centsEl.textContent = `${sc > 0 ? "+" : ""}${sc.toFixed(0)}`;
+    centsEl.style.color = Math.abs(sc) < 15 ? "#ffd60a" : "#ff453a";
+  }
+
+  const angle = Math.max(-50, Math.min(50, sc)) / 50 * 60;
+  needleEl.setAttribute("transform", `rotate(${angle.toFixed(1)} 100 100)`);
+
+  requestAnimationFrame(loop);
+}
+
+// ---- 啟動(iOS 需要在使用者手勢內建立 AudioContext)----
+$("startBtn").addEventListener("click", async () => {
+  errEl.textContent = "";
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    await audioCtx.resume();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        autoGainControl: false,
+        noiseSuppression: false,
+      }
+    });
+    const src = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    src.connect(analyser);
+    buf = new Float32Array(analyser.fftSize);
+
+    overlayEl.classList.add("hidden");
+    loop();
+
+    // 保持螢幕常亮(iOS 16.4+)
+    if ("wakeLock" in navigator) {
+      try { await navigator.wakeLock.request("screen"); } catch (e) {}
+      document.addEventListener("visibilitychange", async () => {
+        if (document.visibilityState === "visible") {
+          try { await navigator.wakeLock.request("screen"); } catch (e) {}
+        }
+      });
+    }
+  } catch (e) {
+    errEl.textContent = e.name === "NotAllowedError"
+      ? "麥克風權限被拒絕,請到「設定 > Safari > 麥克風」開啟後重試"
+      : `無法啟動:${e.message}`;
+  }
+});
+
+updateStringButtons();
+</script>
+</body>
+</html>
