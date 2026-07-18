@@ -14,27 +14,29 @@
     font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
     background: #111418;
     color: #e8eaed;
+    height: 100dvh; /* 實際可視高度,扣掉 Safari 工具列 */
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
-    padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+    gap: 6px;
+    padding: calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 10px);
     user-select: none;
     -webkit-user-select: none;
     touch-action: manipulation;
   }
-  h1 { font-size: 17px; font-weight: 600; color: #9aa0a6; letter-spacing: 2px; }
+  h1 { font-size: 14px; font-weight: 600; color: #9aa0a6; letter-spacing: 2px; }
 
   /* 音名顯示 */
   .note-area { text-align: center; }
   .note-name {
-    font-size: 96px;
+    font-size: clamp(48px, 12vh, 88px);
     font-weight: 700;
     line-height: 1.1;
     font-variant-numeric: tabular-nums;
     transition: color .15s;
   }
-  .note-name sub { font-size: 40px; }
+  .note-name sub { font-size: .42em; }
   .freq { font-size: 15px; color: #9aa0a6; min-height: 20px; font-variant-numeric: tabular-nums; }
   .level {
     width: 160px;
@@ -55,13 +57,13 @@
   .off-tune { color: #e8eaed; }
 
   /* 指針表 */
-  .meter { width: 100%; max-width: 360px; }
-  .meter svg { width: 100%; display: block; }
+  .meter { width: 100%; max-width: 360px; min-height: 0; }
+  .meter svg { width: 100%; max-height: 22vh; display: block; margin: 0 auto; }
   .cents-label {
     text-align: center;
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 600;
-    min-height: 30px;
+    min-height: 24px;
     font-variant-numeric: tabular-nums;
     color: #9aa0a6;
   }
@@ -75,21 +77,21 @@
     max-width: 400px;
   }
   .string-btn {
-    aspect-ratio: 1 / 1.15;
+    padding: 8px 0;
     border: 1.5px solid #3c4043;
-    border-radius: 14px;
+    border-radius: 12px;
     background: #1b1f24;
     color: #e8eaed;
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
+    gap: 1px;
     cursor: pointer;
   }
-  .string-btn small { font-size: 11px; color: #9aa0a6; font-weight: 400; }
+  .string-btn small { font-size: 10px; color: #9aa0a6; font-weight: 400; }
   .string-btn.active { border-color: #0a84ff; background: #16232f; color: #0a84ff; }
   .string-btn.active small { color: #0a84ff; }
   .string-btn.tuned { border-color: #34c759; }
@@ -101,8 +103,8 @@
     border-radius: 999px;
     background: #1b1f24;
     color: #9aa0a6;
-    font-size: 14px;
-    padding: 8px 18px;
+    font-size: 13px;
+    padding: 6px 16px;
     cursor: pointer;
   }
   .mode-btn.active { border-color: #0a84ff; color: #0a84ff; background: #16232f; }
